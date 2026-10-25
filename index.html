@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>ねこブロックパズル 爆弾キラキラ版</title>
+<style>
+*{
+box-sizing:border-box;
+-webkit-tap-highlight-color:transparent;
+}
+html,body{
+margin:0;
+height:100%;
+overflow:hidden;
+touch-action:none;
+font-family:sans-serif;
+background:#f7f3ea;
+}
+.screen{
+display:none;
+height:100vh;
+padding:16px;
+flex-direction:column;
+align-items:center;
+justify-content:center;
+text-align:center;
+}
+.active{
+display:flex;
+}
+h1,h2{
+margin:10px 0;
+}
+button{
+border:none;
+background:#ff9f43;
+color:#fff;
+padding:14px 24px;
+font-size:18px;
+border-radius:14px;
+min-width:200px;
+cursor:pointer;
+}
+#gameScreen{
+justify-content:flex-start;
+}
+.topbar{
+width:100%;
+max-width:520px;
+display:flex;
+justify-content:space-between;
+font-size:20px;
+font-weight:bold;
+margin-bottom:10px;
+}
+#board{
+width:min(96vw,520px);
+aspect-ratio:6/8;
+display:grid;
+grid-template-columns:repeat(6,1fr);
+grid-template-rows:repeat(8,1fr);
+gap:4px;
+touch-action:none;
+position:relative;
+}
+.cell{
+border-radius:12px;
+display:flex;
+align-items:center;
+justify-content:center;
+font-size:clamp(20px,4vw,32px);
+user-select:none;
+cursor:pointer;
+position:relative;
+overflow:hidden;
+}
+
+.spark{
+position:absolute;
+width:10px;
+height:10px;
+border-radius:50%;
+pointer-events:none;
+animation:spark 0.8s ease-out forwards;
+}
+
+@keyframes spark{
+0%{
+transform:translate(0,0) scale(0.2);
+opacity:1;
+}
+100%{
+transform:translate(var(--x),var(--y)) scale(1.8);
+opacity:0;
+}
+}
+
+.info{
+max-width:520px;
+line-height:1.8;
+}
+</style>
+</head>
+<body>
+
+<div id="startScreen" class="screen active">
+<h1>🐱 ねこブロックパズル</h1>
+
+<div class="info">
+同じ色・同じ柄のねこブロックを消して高得点！<br>
+💣爆弾ブロックをタップすると周囲をまとめて消去！<br>
+さらにキラキラ演出で大爆発！<br>
+60秒で最高スコアを目指そう！
+</div>
+
+<br>
+<button id="startBtn">スタート</button>
+</div>
+
+<div id="gameScreen" class="screen">
+<div class="topbar">
+<div>スコア: <span id="score">0</span></div>
+<div>⏰ <span id="time">60</span></div>
+</div>
+
+<div id="board"></div>
+</div>
+
+<div id="resultScreen" class="screen">
+<h1>結果発表</h1>
+<h2>スコア: <span id="finalScore">0</span></h2>
+<h2>ランク: <span id="rank">C</span></h2>
+<button id="restartBtn">もう一度遊ぶ</button>
+</div>
+
+<script>
+const rows=8;
+const cols=6;
+
+const colors=[
+"#ff7675",
+"#74b9ff",
+"#55efc4",
+"#ffeaa7"
+];
+
+const patterns=[
+"🐱",
+"😺",
+"😸",
+"😻"
+];
+
+const board=document.getElementById("board");
+const scoreEl=document.getElementById("score");
+const timeEl=document.getElementById("time");
+const finalScore=document.getElementById("finalScore");
+const rankEl=document.getElementById("rank");
+
+let grid=[];
+let score=0;
+let time=60;
+let timer=null;
+
+function show(id){
+document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+document.getElementById(id).classList.add("active");
+}
+
+function randomBlock(){
+
+if(Math.random()<0.08){
+return {bomb:true};
+}
+
+const t=Math.floor(Math.random()*4);
+
+return{
+c:t,
+p:t,
+bomb:false
+};
+}
+
+function createBoard(){
+
+grid=[];
+
+for(let r=0;r<rows;r++){
+
+const row=[];
+
+for(let c=0;c<cols;c++){
+row.push(randomBlock());
+}
+
+grid.push(row);
+}
+
+render();
+}
+
+function render(){
+
+board.innerHTML="";
+
+for(let r=0;r<rows;r++){
+
+for(let c=0;c<cols;c++){
+
+const cell=document.createElement("div");
+cell.className="cell";
+
+cell.dataset.r=r;
+cell.dataset.c=c;
+
+const b=grid[r][c];
+
+if(b){
+
+if(b.bomb){
+cell.style.background="#2d3436";
+cell.textContent="💣";
+}else{
+cell.style.background=colors[b.c];
+cell.textContent=patterns[b.p];
+}
+
+}
+
+cell.addEventListener("click",tapCell);
+
+board.appendChild(cell);
+}
+}
+}
+
+function tapCell(e){
+
+const r=Number(e.currentTarget.dataset.r);
+const c=Number(e.currentTarget.dataset.c);
+
+const block=grid[r][c];
+
+if(!block) return;
+
+if(block.bomb){
+explodeBomb(r,c,e.currentTarget);
+return;
+}
+
+const target=block;
+
+const stack=[[r,c]];
+const visited={};
+const group=[];
+
+while(stack.length){
+
+const [y,x]=stack.pop();
+
+if(y<0||y>=rows||x<0||x>=cols) continue;
+
+const key=y+"_"+x;
+
+if(visited[key]) continue;
+
+visited[key]=true;
+
+const b=grid[y][x];
+
+if(!b || b.bomb) continue;
+
+if(b.c!==target.c || b.p!==target.p) continue;
+
+group.push([y,x]);
+
+stack.push([y+1,x]);
+stack.push([y-1,x]);
+stack.push([y,x+1]);
+stack.push([y,x-1]);
+}
+
+if(group.length<2) return;
+
+group.forEach(([y,x])=>{
+grid[y][x]=null;
+});
+
+score+=group.length*group.length*10;
+
+updateBoard();
+}
+
+function createSparkles(target){
+
+const rect=target.getBoundingClientRect();
+
+for(let i=0;i<24;i++){
+
+const spark=document.createElement("div");
+spark.className="spark";
+
+spark.style.left=(rect.left+rect.width/2)+"px";
+spark.style.top=(rect.top+rect.height/2)+"px";
+
+spark.style.background=[
+"#fff700",
+"#ffffff",
+"#ffd700",
+"#00e5ff",
+"#ff66ff"
+][Math.floor(Math.random()*5)];
+
+spark.style.setProperty(
+"--x",
+(Math.random()*220-110)+"px"
+);
+
+spark.style.setProperty(
+"--y",
+(Math.random()*220-110)+"px"
+);
+
+document.body.appendChild(spark);
+
+spark.addEventListener("animationend",()=>{
+spark.remove();
+});
+}
+}
+
+function explodeBomb(r,c,target){
+
+createSparkles(target);
+
+let removed=0;
+
+for(let y=r-1;y<=r+1;y++){
+
+for(let x=c-1;x<=c+1;x++){
+
+if(
+y>=0 &&
+y<rows &&
+x>=0 &&
+x<cols &&
+grid[y][x]
+){
+grid[y][x]=null;
+removed++;
+}
+
+}
+}
+
+score+=removed*25;
+
+updateBoard();
+}
+
+function updateBoard(){
+
+scoreEl.textContent=score;
+
+dropBlocks();
+fillBlocks();
+render();
+}
+
+function dropBlocks(){
+
+for(let c=0;c<cols;c++){
+
+const list=[];
+
+for(let r=rows-1;r>=0;r--){
+
+if(grid[r][c]){
+list.push(grid[r][c]);
+}
+
+}
+
+for(let r=rows-1,i=0;r>=0;r--){
+
+grid[r][c]=list[i++]||null;
+
+}
+}
+}
+
+function fillBlocks(){
+
+for(let r=0;r<rows;r++){
+
+for(let c=0;c<cols;c++){
+
+if(!grid[r][c]){
+grid[r][c]=randomBlock();
+}
+
+}
+}
+}
+
+function getRank(score){
+
+if(score>=5000) return "S";
+if(score>=3000) return "A";
+if(score>=1800) return "B";
+return "C";
+}
+
+function startGame(){
+
+score=0;
+time=60;
+
+scoreEl.textContent="0";
+timeEl.textContent="60";
+
+createBoard();
+
+show("gameScreen");
+
+clearInterval(timer);
+
+timer=setInterval(()=>{
+
+time--;
+
+timeEl.textContent=time;
+
+if(time<=0){
+
+clearInterval(timer);
+
+endGame();
+
+}
+
+},1000);
+}
+
+function endGame(){
+
+finalScore.textContent=score;
+rankEl.textContent=getRank(score);
+
+show("resultScreen");
+}
+
+document.getElementById("startBtn").addEventListener("click",startGame);
+document.getElementById("restartBtn").addEventListener("click",startGame);
+
+document.addEventListener("gesturestart",e=>e.preventDefault());
+
+document.addEventListener("touchmove",e=>{
+e.preventDefault();
+},{passive:false});
+</script>
+
+</body>
+</html>
